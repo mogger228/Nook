@@ -1,0 +1,11 @@
+bin/
+obj/
+artifacts/
+data/
+*.user
+*.log
+.tools/
+.codex/cache/
+dist/
+drafts/
+.codex/config.toml
