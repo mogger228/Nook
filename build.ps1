@@ -5,7 +5,7 @@ $compiler = Join-Path $framework 'csc.exe'
 if (!(Test-Path -LiteralPath $compiler)) { throw 'Не найден системный компилятор .NET Framework 4.x. Ничего не установлено.' }
 $output = Join-Path $PSScriptRoot 'bin'
 New-Item -ItemType Directory -Force -Path $output | Out-Null
-$references = @('System.dll','System.Core.dll','System.Drawing.dll','System.Xaml.dll') | ForEach-Object { '/reference:' + (Join-Path $framework $_) }
+$references = @('System.dll','System.Core.dll','System.Drawing.dll','System.Xaml.dll','System.Web.Extensions.dll') | ForEach-Object { '/reference:' + (Join-Path $framework $_) }
 $references += @('WindowsBase.dll','PresentationCore.dll','PresentationFramework.dll') | ForEach-Object { '/reference:' + (Join-Path $framework ('WPF\' + $_)) }
 if (!$OutputFile) { $OutputFile = Join-Path $output 'Nook.exe' }
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' | ForEach-Object FullName)

@@ -45,6 +45,7 @@ namespace Nook {
    if(candidate.HotkeyKey==0) return candidate.HotkeyModifiers==0 ? null : "Выберите основную клавишу сочетания.";
    uint modifiers=candidate.HotkeyModifiers;
    if(modifiers==1 && candidate.HotkeyKey==32) return "Alt + Пробел используется поиском приложений панели.";
+   if(modifiers==3 && candidate.HotkeyKey==32) return "Ctrl + Alt + Пробел используется веб-поиском панели.";
    if((modifiers&~7u)!=0 || (modifiers&3u)==0) return "Используйте Ctrl или Alt вместе с клавишей; можно добавить Shift.";
    uint key=candidate.HotkeyKey;
    if(key<8 || key>254 || key==0x10 || key==0x11 || key==0x12 || key==0x5B || key==0x5C || key>=0xA0 && key<=0xA5 || key==0x7B) return "Эта клавиша зарезервирована. Выберите другое сочетание.";

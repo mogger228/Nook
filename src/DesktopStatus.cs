@@ -18,6 +18,7 @@ namespace Nook {
   public string DateText { get; internal set; }
   public string DateHint { get; internal set; }
   public bool BatteryAvailable { get; internal set; }
+  public bool BatteryOnAC { get; internal set; }
   public bool WifiConnected { get; internal set; }
   public bool BluetoothAvailable { get; internal set; }
  }
@@ -59,6 +60,7 @@ namespace Nook {
     bool knownPercentage=power.BatteryLifePercent<=100;
     status.BatteryAvailable=power.BatteryFlag!=255 || knownPercentage;
     if(!status.BatteryAvailable) return;
+    status.BatteryOnAC=power.ACLineStatus==1;
     status.BatteryText=knownPercentage ? power.BatteryLifePercent.ToString(CultureInfo.CurrentCulture)+"%" : "—";
     string charge=knownPercentage ? "Заряд батареи: "+status.BatteryText+"." : "Уровень заряда батареи недоступен.";
     bool charging=power.BatteryFlag!=255 && (power.BatteryFlag&8)!=0;

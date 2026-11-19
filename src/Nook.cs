@@ -56,6 +56,7 @@ namespace Nook {
   public bool Animations = true;
   public bool EdgeHighlight = true;
   public string SearchColor = "#000000";
+  public WebSearchOptions WebSearch = new WebSearchOptions();
   public double SearchOpacity = .88,SearchRadius = 24,SearchWidth = 520,SearchFontSize = 19,SearchX = .5,SearchY = .35;
   public bool InitialSetupComplete = true;
   public string PinImportStatus;
@@ -199,10 +200,12 @@ namespace Nook {
   void UserPreferenceChanged(object sender,UserPreferenceChangedEventArgs e) { if(closing) return; Dispatcher.BeginInvoke(new Action(delegate { if(!closing) Place(); })); }
   IntPtr WndProc(IntPtr h,int msg,IntPtr w,IntPtr l,ref bool handled) {
    if(msg==0x0312 && w.ToInt32()==SearchHotkeyId) { if(!closing) Dispatcher.BeginInvoke(new Action(ShowAppSearch)); handled=true; return IntPtr.Zero; }
+   if(msg==0x0312 && w.ToInt32()==WebSearchHotkeyId) { if(!closing) Dispatcher.BeginInvoke(new Action(ShowWebSearch)); handled=true; return IntPtr.Zero; }
    if(msg==0x112 && (w.ToInt64()&0xFFF0)==0xF060) { handled=true; return IntPtr.Zero; }
    if(msg==0x0312 && HandleScenarioHotkey(w,l)) { handled=true; return IntPtr.Zero; }
    if(msg==taskbarCreatedMessage && !closing) Dispatcher.BeginInvoke(new Action(delegate { if(closing) return; if(taskbarHidden) Native.HideTaskbars(); if(appbar!=null) appbar.Invalidate(); Place(); UpdateClock(); }));
    if(msg==0x1E && desktopClock!=null && !closing) desktopClock.RefreshTime();
+   if(msg==0x0218 && w.ToInt64()==0x0A && !closing) Dispatcher.BeginInvoke(new Action(PowerStatusChanged));
    if(msg==0x8002) { Dispatcher.BeginInvoke(new Action(ShowSettings)); handled=true; }
    if(msg==0x8003) { Dispatcher.BeginInvoke(new Action(Close)); handled=true; }
    if(msg==0x8004) { Directory.CreateDirectory(Preferences.Folder); File.WriteAllText(Path.Combine(Preferences.Folder,"diagnostics.txt"),Diagnostics()+" HoverWave="+HoverWaveDiagnostics); handled=true; }

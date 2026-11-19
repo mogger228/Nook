@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -17,15 +18,18 @@ namespace Nook {
   DateTime searchCatalogTime=DateTime.MinValue;
   string searchPinsSignature="",searchHotkeyError="";
   bool searchReading,searchHotkeyRegistered;
-  string SearchDiagnostics { get { return " SearchHotkey="+searchHotkeyRegistered+" SearchApps="+searchApps.Count+" SearchVisible="+(appSearchWindow!=null && appSearchWindow.IsVisible); } }
+  string SearchDiagnostics { get { return " SearchHotkey="+searchHotkeyRegistered+" WebSearchHotkey="+webSearchRegistered+" SearchApps="+searchApps.Count+" SearchVisible="+(appSearchWindow!=null && appSearchWindow.IsVisible); } }
   void InitializeSearch() {
    searchHotkeyRegistered=RegisterHotKey(handle,SearchHotkeyId,0x4001,32);
    if(!searchHotkeyRegistered) searchHotkeyError="Alt + Пробел занят. Освободите сочетание и перезапустите панель.";
    RefreshSearchCatalog(true);
+   webSearchRegistered=RegisterHotKey(handle,WebSearchHotkeyId,0x4003,32);
   }
   void StopSearch() {
    if(searchHotkeyRegistered) { UnregisterHotKey(handle,SearchHotkeyId); searchHotkeyRegistered=false; }
    if(appSearchWindow!=null) { appSearchWindow.Close(); appSearchWindow=null; }
+   if(webSearchRegistered) { UnregisterHotKey(handle,WebSearchHotkeyId); webSearchRegistered=false; }
+   if(webSearchWindow!=null) { webSearchWindow.Close(); webSearchWindow=null; }
   }
   void ShowAppSearch() {
    if(closing || scenarioEditorOpen) return;
@@ -64,41 +68,48 @@ namespace Nook {
    SettingsSlider(appearance,"По вертикали",0,100,prefs.SearchY*100,1,"%",delegate(double v) { prefs.SearchY=v/100; });
    appearance.Children.Add(SettingHint("Оформление применяется при следующем открытии. Высота зависит от числа результатов, максимум три.",new Thickness(0)));
    appearance.Children.Add(ScenarioButton("Открыть поиск",ShowAppSearch));
+   BuildWebSearchSettings(page);
   }
  }
  sealed class SearchWindow : Window {
   readonly Preferences prefs;
   readonly Action<SearchApp> launch;
+  readonly WebSearchOptions web;
+  readonly Brush ink;
+  CancellationTokenSource suggestionRequest;
   readonly TextBox input=new TextBox();
   readonly ListBox results=new ListBox();
   readonly Border plate=new Border();
   readonly Border resultsPlate=new Border();
   readonly TranslateTransform resultsOffset=new TranslateTransform();
   List<SearchApp> catalog=new List<SearchApp>();
-  public SearchWindow(Preferences preferences,Action<SearchApp> open) {
-   prefs=preferences; launch=open;
-   Title="Nook — поиск приложений"; WindowStyle=WindowStyle.None; ResizeMode=ResizeMode.NoResize;
+  public SearchWindow(Preferences preferences,Action<SearchApp> open) : this(preferences,open,null) { }
+  public SearchWindow(Preferences preferences,Action<SearchApp> open,WebSearchOptions webOptions) {
+   prefs=preferences; launch=open; web=webOptions;
+   ink=web==null ? Brushes.White : Brushes.Black;
+   Title=web==null ? "Nook — поиск приложений" : "Nook — веб-поиск"; WindowStyle=WindowStyle.None; ResizeMode=ResizeMode.NoResize;
    AllowsTransparency=true; Background=Brushes.Transparent; ShowInTaskbar=false; Topmost=true;
    SizeToContent=SizeToContent.Height; UseLayoutRounding=true;
    var body=new StackPanel(); Content=body;
-   plate.Padding=new Thickness(16); plate.BorderThickness=new Thickness(1); plate.BorderBrush=new SolidColorBrush(Color.FromArgb(65,255,255,255)); plate.Child=input;
+   byte edge=web==null ? (byte)255 : (byte)0;
+   plate.Padding=new Thickness(16); plate.BorderThickness=new Thickness(1); plate.BorderBrush=new SolidColorBrush(Color.FromArgb(65,edge,edge,edge)); plate.Child=input;
    resultsPlate.Padding=new Thickness(8); resultsPlate.BorderThickness=new Thickness(1,0,1,1); resultsPlate.BorderBrush=plate.BorderBrush;
    resultsPlate.Margin=new Thickness(28,0,28,0); resultsPlate.Child=results; resultsPlate.Visibility=Visibility.Collapsed; resultsPlate.RenderTransform=resultsOffset;
-   input.Background=Brushes.Transparent; input.Foreground=Brushes.White; input.CaretBrush=Brushes.White; input.BorderThickness=new Thickness(0); input.Padding=new Thickness(6); input.MaxLength=256;
-   System.Windows.Automation.AutomationProperties.SetName(input,"Поиск приложений");
+   input.Background=Brushes.Transparent; input.Foreground=ink; input.CaretBrush=ink; input.BorderThickness=new Thickness(0); input.Padding=new Thickness(6); input.MaxLength=256;
+   System.Windows.Automation.AutomationProperties.SetName(input,web==null ? "Поиск приложений" : "Поиск в интернете");
    body.Children.Add(plate); body.Children.Add(resultsPlate);
-   results.Background=Brushes.Transparent; results.BorderThickness=new Thickness(0); results.Foreground=Brushes.White; results.DisplayMemberPath="Name"; results.Focusable=false;
+   results.Background=Brushes.Transparent; results.BorderThickness=new Thickness(0); results.Foreground=ink; results.DisplayMemberPath="Name"; results.Focusable=false;
    results.Padding=new Thickness(0); results.Tag=48.0;
    results.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty,ScrollBarVisibility.Disabled);
    results.SetValue(ScrollViewer.VerticalScrollBarVisibilityProperty,ScrollBarVisibility.Hidden);
-   var style=new Style(typeof(ListBoxItem)); style.Setters.Add(new Setter(Control.PaddingProperty,new Thickness(10,8,10,8))); style.Setters.Add(new Setter(Control.ForegroundProperty,Brushes.White)); style.Setters.Add(new Setter(Control.BackgroundProperty,Brushes.Transparent)); style.Setters.Add(new Setter(UIElement.FocusableProperty,false));
+   var style=new Style(typeof(ListBoxItem)); style.Setters.Add(new Setter(Control.PaddingProperty,new Thickness(10,8,10,8))); style.Setters.Add(new Setter(Control.ForegroundProperty,ink)); style.Setters.Add(new Setter(Control.BackgroundProperty,Brushes.Transparent)); style.Setters.Add(new Setter(UIElement.FocusableProperty,false));
    style.Setters.Add(new Setter(System.Windows.Automation.AutomationProperties.NameProperty,new System.Windows.Data.Binding("Name")));
    style.Setters.Add(new Setter(FrameworkElement.HeightProperty,new System.Windows.Data.Binding("Tag") { RelativeSource=new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor,typeof(ListBox),1) }));
    var border=new FrameworkElementFactory(typeof(Border)); border.SetValue(Border.CornerRadiusProperty,new CornerRadius(7)); border.SetBinding(Border.BackgroundProperty,new System.Windows.Data.Binding("Background") { RelativeSource=new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) });
    border.SetBinding(Border.PaddingProperty,new System.Windows.Data.Binding("Padding") { RelativeSource=new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.TemplatedParent) }); border.AppendChild(new FrameworkElementFactory(typeof(ContentPresenter)));
    style.Setters.Add(new Setter(Control.TemplateProperty,new ControlTemplate(typeof(ListBoxItem)) { VisualTree=border }));
-   var selected=new Trigger { Property=ListBoxItem.IsSelectedProperty,Value=true }; selected.Setters.Add(new Setter(Control.BackgroundProperty,new SolidColorBrush(Color.FromArgb(65,255,255,255)))); style.Triggers.Add(selected); results.ItemContainerStyle=style;
-   input.TextChanged+=delegate { UpdateResults(); };
+   var selected=new Trigger { Property=ListBoxItem.IsSelectedProperty,Value=true }; selected.Setters.Add(new Setter(Control.BackgroundProperty,plate.BorderBrush)); style.Triggers.Add(selected); results.ItemContainerStyle=style;
+   input.TextChanged+=delegate { if(web==null) UpdateResults(); else UpdateSuggestions(); };
    results.SelectionChanged+=delegate { if(results.SelectedItem!=null) results.ScrollIntoView(results.SelectedItem); };
    PreviewKeyDown+=delegate(object sender,KeyEventArgs e) {
     if(e.Key==Key.Escape) { Hide(); e.Handled=true; }
@@ -107,6 +118,7 @@ namespace Nook {
    };
    results.PreviewMouseLeftButtonUp+=delegate { OpenSelected(); };
    Deactivated+=delegate { Hide(); };
+   IsVisibleChanged+=delegate { if(!IsVisible && suggestionRequest!=null) suggestionRequest.Cancel(); };
    SizeChanged+=delegate { Position(); };
   }
   public void SetCatalog(List<SearchApp> apps) {
@@ -115,33 +127,62 @@ namespace Nook {
   }
   public void Open(List<SearchApp> apps) {
    var work=SystemParameters.WorkArea;
-   Width=Math.Min(Math.Max(1,work.Width-24),Preferences.Clamp(prefs.SearchWidth,280,900,520)); MaxHeight=Math.Max(1,work.Height-24);
-   FontFamily=new FontFamily("Segoe UI"); FontSize=Preferences.Clamp(prefs.SearchFontSize,14,32,20);
+   Width=Math.Min(Math.Max(1,work.Width-24),Preferences.Clamp(web==null ? prefs.SearchWidth : web.Width,280,900,520)); MaxHeight=Math.Max(1,work.Height-24);
+   FontFamily=new FontFamily("Segoe UI"); FontSize=Preferences.Clamp(web==null ? prefs.SearchFontSize : web.FontSize,14,32,19);
    results.Tag=Math.Ceiling(FontSize*1.6+16);
-   double radius=Preferences.Clamp(prefs.SearchRadius,0,40,16);
+   double radius=Preferences.Clamp(web==null ? prefs.SearchRadius : web.Radius,0,40,24);
    plate.CornerRadius=new CornerRadius(radius);
    resultsPlate.CornerRadius=new CornerRadius(0,0,radius,radius);
-   var color=(Color)ColorConverter.ConvertFromString(Preferences.NormalizeGlassColor(prefs.SearchColor)); color.A=(byte)Math.Round(255*Preferences.Clamp(prefs.SearchOpacity,.2,1,.88)); plate.Background=resultsPlate.Background=new SolidColorBrush(color);
-   catalog=apps; input.Clear(); UpdateResults(); Show(); Position(); Activate();
+   var color=(Color)ColorConverter.ConvertFromString(Preferences.NormalizeGlassColor(web==null ? prefs.SearchColor : web.Color)); color.A=(byte)Math.Round(255*Preferences.Clamp(web==null ? prefs.SearchOpacity : web.Opacity,.2,1,.88)); plate.Background=resultsPlate.Background=new SolidColorBrush(color);
+   catalog=apps; input.Clear();
+   if(web==null) UpdateResults(); else SetResults(null);
+   Show(); Position(); Activate();
    Dispatcher.BeginInvoke(DispatcherPriority.Input,new Action(delegate { if(IsVisible) { input.Focus(); Keyboard.Focus(input); } }));
   }
   void UpdateResults() {
+   SetResults(AppSearch.Find(catalog,input.Text));
+  }
+  void SetResults(List<SearchApp> matches) {
    bool wasVisible=resultsPlate.Visibility==Visibility.Visible;
-   results.ItemsSource=AppSearch.Find(catalog,input.Text);
+   results.ItemsSource=matches;
    results.Height=Math.Min(3,results.Items.Count)*(double)results.Tag+2;
    results.Visibility=results.Items.Count>0 ? Visibility.Visible : Visibility.Collapsed;
    resultsPlate.Visibility=results.Visibility;
-   results.SelectedIndex=results.Items.Count>0 ? 0 : -1;
+   results.SelectedIndex=web==null && results.Items.Count>0 ? 0 : -1;
    if(!wasVisible && results.Items.Count>0 && IsVisible && prefs.Animations) {
     resultsOffset.BeginAnimation(TranslateTransform.YProperty,new DoubleAnimation(-6,0,TimeSpan.FromMilliseconds(140)) { FillBehavior=FillBehavior.Stop,EasingFunction=new CubicEase { EasingMode=EasingMode.EaseOut } });
     resultsPlate.BeginAnimation(UIElement.OpacityProperty,new DoubleAnimation(0,1,TimeSpan.FromMilliseconds(140)) { FillBehavior=FillBehavior.Stop });
    }
   }
-  void OpenSelected() { var app=results.SelectedItem as SearchApp; if(app==null) return; Hide(); launch(app); }
+  async void UpdateSuggestions() {
+   if(suggestionRequest!=null) suggestionRequest.Cancel();
+   SetResults(null);
+   string query=input.Text.Trim();
+   if(!IsVisible || !web.Suggestions || query.Length<2 || WebSearch.Address(query)!=null || query.Contains("://") || query.Contains("@")) return;
+   var pending=new CancellationTokenSource();
+   suggestionRequest=pending;
+   try {
+    await System.Threading.Tasks.Task.Delay(300,pending.Token);
+    pending.CancelAfter(3500);
+    var matches=await WebSearch.Suggest(query,web.Engine,pending.Token);
+    if(IsVisible && !pending.IsCancellationRequested && suggestionRequest==pending) SetResults(matches);
+   } catch(OperationCanceledException) { }
+   catch(System.Net.WebException) { }
+   catch(IOException) { }
+   catch(ArgumentException) { }
+   catch(InvalidOperationException) { }
+   finally { if(suggestionRequest==pending) suggestionRequest=null; pending.Dispose(); }
+  }
+  void OpenSelected() {
+   var app=results.SelectedItem as SearchApp;
+   if(web!=null && app==null && input.Text.Trim().Length>0) app=new SearchApp { Target=WebSearch.Resolve(input.Text.Trim(),web.Engine) };
+   if(app==null) return;
+   Hide(); launch(app);
+  }
   void Position() {
    var work=SystemParameters.WorkArea;
-   Left=work.Left+Math.Max(0,work.Width-Width)*Preferences.Clamp(prefs.SearchX,0,1,.5);
-   Top=Math.Max(work.Top,Math.Min(work.Bottom-ActualHeight,work.Top+Math.Max(0,work.Height-plate.ActualHeight)*Preferences.Clamp(prefs.SearchY,0,1,.35)));
+   Left=work.Left+Math.Max(0,work.Width-Width)*Preferences.Clamp(web==null ? prefs.SearchX : web.X,0,1,.5);
+   Top=Math.Max(work.Top,Math.Min(work.Bottom-ActualHeight,work.Top+Math.Max(0,work.Height-plate.ActualHeight)*Preferences.Clamp(web==null ? prefs.SearchY : web.Y,0,1,.35)));
   }
  }
 }

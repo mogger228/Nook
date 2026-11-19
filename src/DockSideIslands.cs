@@ -181,19 +181,32 @@ namespace Nook {
     if(next!=currentInputLanguage) { currentInputLanguage=next; sideLanguageLabel.Text=next; }
    } catch(EntryPointNotFoundException) { sideLanguageLabel.Text="—"; } catch(DllNotFoundException) { sideLanguageLabel.Text="—"; }
   }
+  bool sidePowerRefreshPending;
+  void PowerStatusChanged() {
+   if(closing) return;
+   if(sideStatusBusy) sidePowerRefreshPending=true;
+   else RequestSideStatus();
+  }
   void RequestSideStatus() {
    if(closing || sideStatusBusy || !prefs.RightStatusIslandEnabled || !prefs.SideShowBattery && !prefs.SideShowWifi) return;
    sideStatusBusy=true;
    Task.Run(delegate { return DesktopStatus.ReadDock(); }).ContinueWith(delegate(Task<StatusSnapshot> task) {
     StatusSnapshot result=task.Status==TaskStatus.RanToCompletion ? task.Result : null;
     if(Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
-    try { Dispatcher.BeginInvoke(new Action(delegate { sideStatusBusy=false; if(closing) return; if(result!=null) sideStatus=result; UpdateSideStatusPresentation(); })); }
+    try { Dispatcher.BeginInvoke(new Action(delegate {
+     sideStatusBusy=false;
+     if(closing) return;
+     if(result!=null) sideStatus=result;
+     UpdateSideStatusPresentation();
+     if(sidePowerRefreshPending) { sidePowerRefreshPending=false; RequestSideStatus(); }
+    })); }
     catch(InvalidOperationException) { }
    });
   }
   void UpdateSideStatusPresentation() {
    if(sideBatteryButton==null) return;
    sideBatteryLabel.Text=sideStatus==null ? "—" : sideStatus.BatteryText;
+   sideBatteryGlyph.SetBatteryOnAC(sideStatus!=null && sideStatus.BatteryOnAC);
    sideBatteryButton.ToolTip=sideStatus==null ? "Проверка батареи…" : sideStatus.BatteryHint+"\nОткрыть параметры питания";
    sideWifiButton.ToolTip=sideStatus==null ? "Проверка Wi-Fi…" : sideStatus.WifiText+"\n"+sideStatus.WifiHint+"\nОткрыть настройки Wi-Fi";
    sideBatteryButton.Opacity=sideStatus!=null && sideStatus.BatteryAvailable ? 1 : .55;
@@ -207,12 +220,24 @@ namespace Nook {
   sealed class SideGlyph : FrameworkElement {
    public enum Kind { Battery,Wifi }
    readonly Kind kind;
+   static readonly Geometry chargingBolt=(Geometry)Geometry.Parse("M 12,7 L 7,13 L 11,13 L 9,17 L 15,11 L 11,11 Z").GetAsFrozen();
+   bool batteryOnAC;
    public SideGlyph(Kind value) { kind=value; IsHitTestVisible=false; }
+   public void SetBatteryOnAC(bool connected) {
+    if(batteryOnAC==connected) return;
+    batteryOnAC=connected;
+    InvalidateVisual();
+   }
    protected override void OnRender(System.Windows.Media.DrawingContext dc) {
     double scale=Math.Min(ActualWidth,ActualHeight)/24; if(scale<=0) return;
     dc.PushTransform(new ScaleTransform(scale,scale));
     var pen=new Pen(Brushes.White,1.7) { StartLineCap=PenLineCap.Round,EndLineCap=PenLineCap.Round,LineJoin=PenLineJoin.Round };
-    if(kind==Kind.Battery) { dc.DrawRoundedRectangle(null,pen,new Rect(2,6,18,12),2,2); dc.DrawLine(pen,new Point(22,10),new Point(22,14)); dc.DrawRectangle(Brushes.White,null,new Rect(4,8,4,8)); }
+    if(kind==Kind.Battery) {
+     dc.DrawRoundedRectangle(null,pen,new Rect(2,6,18,12),2,2);
+     dc.DrawLine(pen,new Point(22,10),new Point(22,14));
+     if(batteryOnAC) dc.DrawGeometry(Brushes.White,null,chargingBolt);
+     else dc.DrawRectangle(Brushes.White,null,new Rect(4,8,4,8));
+    }
     else {
      DrawCurve(dc,pen,new Point(2,8),new Point(12,-1),new Point(22,8));
      DrawCurve(dc,pen,new Point(5.5,12),new Point(12,6),new Point(18.5,12));
